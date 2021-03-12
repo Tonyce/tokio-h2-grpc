@@ -9,9 +9,11 @@ use h2::server;
 use http::{HeaderMap, HeaderValue};
 use prost::Message;
 use tokio::net::{TcpListener, TcpStream};
+// use tracing_subscriber;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    tracing_subscriber::fmt::init();
     let _ = env_logger::try_init();
 
     let p = proto::helloworld::HelloReply {
@@ -37,20 +39,38 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                     println!("  -> err={:?}", e);
                 }
             });
+        } else {
+            println!("=-=-=-=-=-=-==-=-=-=-=-=-=-=-=-");
         }
     }
 }
 
 async fn handle(socket: TcpStream) -> Result<(), Box<dyn Error + Send + Sync>> {
     let mut connection = server::handshake(socket).await?;
+    // let mut builder = h2::server::Builder::default();
+    // builder
+    //     .initial_window_size(config.initial_stream_window_size)
+    //     .initial_connection_window_size(config.initial_conn_window_size)
+    //     .max_frame_size(config.max_frame_size);
+    // let builder = server::Builder::new()
+    // builder
+    //     .initial_connection_window_size(1_000_000)
+    //     .initial_window_size(1_000_000)
+    //     .max_frame_size(1_000_000);
+    // builder.adaptive_window = false;
+    // let mut connection: server::Connection<TcpStream, Bytes> = builder.handshake(socket).await?;
+
+    // connection.set_initial_window_size(1_000_000).unwrap();
     println!("H2 connection bound");
 
     while let Some(result) = connection.accept().await {
         let (request, mut respond) = result?;
+        // let (mut request, mut respond) = result?;
         // println!("GOT request: {:?}", request);
         // let headers = request.headers();
-        // let body = request.body();
         // println!("{:?}", headers);
+
+        // let body = request.body_mut();
 
         let (headers, mut body) = request.into_parts();
         println!("{:?}", headers);
@@ -58,22 +78,21 @@ async fn handle(socket: TcpStream) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut body_buf = vec![];
         while let Some(chunk) = body.data().await {
             let buf: Bytes = chunk?;
+
+            let _ = body.flow_control().release_capacity(buf.len());
+            println!("---{}", body.flow_control().available_capacity());
             body_buf.put(buf);
-            // let mut protobuf_len = &chunk?[0..5];
-            // let len = protobuf_len.read_to_end::<BigEndian>().unwrap();
-            // let len = BigEndian::read_u32(protobuf_len).unwrap();
-            // let protobuf = &chunk?[6..];
-            // println!("{:?}, {:?}", len, protobuf_len);
-            // let num = u64::from_be_bytes(protobuf_len);
-            // println!("RX: {:?}", chunk);
-
-            // let mut numbers_got = [0; 4];
         }
-
+        println!("parseing body done");
         let compressed_flag = &body_buf[0..1];
         let proto_len = &body_buf[1..5];
         let proto_buf = &body_buf[5..];
-        // println!("{:?}, {:?}, {:?}", compressed_flag, proto_len, proto_buf);
+        println!(
+            "{:?}, {:?}, {:?}",
+            compressed_flag,
+            proto_len,
+            proto_buf.len()
+        );
 
         let flags = BigEndian::read_uint(compressed_flag, 1);
         let len = BigEndian::read_uint(proto_len, 4);
@@ -92,8 +111,8 @@ async fn handle(socket: TcpStream) -> Result<(), Box<dyn Error + Send + Sync>> {
         //     // usize::from_ne_bytes(buflen[..]);
         //     println!("{:?}", bodybuf.to_vec());
         //     println!("{:?}", len);
-        let pp = proto::helloworld::HelloRequest::decode(proto_buf).unwrap();
-        println!("{:?}", pp);
+        let _pp = proto::helloworld::HelloRequest::decode(proto_buf).unwrap();
+        // println!("{:?}", pp);
 
         let hello_reply = proto::helloworld::HelloReply {
             message: "haha".to_owned(),
